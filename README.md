@@ -1,11 +1,12 @@
+
+
+<p align="center">
+  <img src="https://i.imgur.com/6JcjUP2.png" width="600">
+</p>
+
 # Eidola
 
 Browser-native generative art gallery built from dynamical systems, motion, geometry, and atmosphere.
-
-<p align="center">
-  <img src="https://i.imgur.com/6JcjUP2.png" width="900">
-</p>
-
 ## Summary
 
 Eidolon is a collection of standalone interactive HTML/canvas artworks. The pieces explore strange attractors, tensegrity, modal vibration, coupled oscillators, grain, glow, typography, and responsive motion. It is the creative-technology wing of the portfolio: a studio artifact that shows aesthetic direction, mathematical visual systems, and comfort building immersive browser-native experiences without a heavy framework.
