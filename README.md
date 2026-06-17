@@ -1,8 +1,8 @@
-# Eidolon
+# Eidola
 
 Browser-native generative art gallery built from dynamical systems, motion, geometry, and atmosphere.
 
-![Eidolon Portal](https://i.imgur.com/yzfEvNz.png)
+![Eidolon Portal](https://i.imgur.com/6JcjUP2.png)
 
 ## Summary
 
