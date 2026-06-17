@@ -1,0 +1,248 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>frozen music</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,400&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: 246, 240, 230; --gold: 232, 196, 130; --dim: 198, 200, 214; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #05040a; overflow: hidden; }
+  body { font-family: "Space Mono", monospace; }
+  canvas#c { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; z-index: 0; }
+  .vignette { position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    background: radial-gradient(125% 125% at 50% 48%, transparent 40%, rgba(3,2,8,0.5) 78%, rgba(1,1,5,0.95) 100%);
+    mix-blend-mode: multiply; }
+
+  .head { position: fixed; top: clamp(20px,4vh,40px); left: 50%; transform: translateX(-50%); z-index: 3;
+    text-align: center; pointer-events: none; transition: opacity 2s ease; }
+  .head .t { font-family: "Cormorant Garamond", serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.9rem,6vw,3.6rem); letter-spacing: 0.16em; color: rgba(var(--ink),0.92);
+    text-shadow: 0 0 28px rgba(232,180,90,0.3), 0 0 4px rgba(255,255,255,0.35); }
+  .head .s { margin-top: 0.9em; font-size: clamp(0.5rem,1.3vw,0.64rem); letter-spacing: 0.5em; text-indent:0.5em;
+    text-transform: uppercase; color: rgba(var(--dim),0.42); }
+
+  .hint { position: fixed; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+    z-index: 3; font-size: 0.58rem; letter-spacing: 0.26em; color: rgba(var(--dim),0.4); text-align: center;
+    pointer-events: none; white-space: nowrap; }
+  .hint b { color: rgba(var(--gold),0.7); font-weight: normal; }
+
+  /* spectrum ladder */
+  .ladder { position: fixed; top: 50%; right: clamp(10px,2vw,26px); transform: translateY(-50%); z-index: 3;
+    display: flex; flex-direction: column; gap: 6px; max-height: 86vh; overflow-y: auto; padding: 4px;
+    scrollbar-width: thin; }
+  .rung { display: flex; align-items: center; gap: 9px; padding: 4px 8px 4px 4px; cursor: pointer;
+    border: 1px solid transparent; border-radius: 4px; transition: background .3s, border-color .3s; }
+  .rung:hover { background: rgba(255,255,255,0.04); }
+  .rung.sel { background: rgba(232,196,130,0.09); border-color: rgba(var(--gold),0.4); }
+  .rung canvas { width: 40px; height: 40px; border-radius: 50%; display: block; }
+  .rung .lab { font-size: 0.56rem; letter-spacing: 0.12em; color: rgba(var(--dim),0.62); line-height: 1.5; }
+  .rung .lab b { color: rgba(var(--ink),0.9); font-weight: normal; }
+  .mute { position: fixed; top: clamp(16px,3vh,28px); right: clamp(12px,2vw,26px); z-index: 4;
+    font-size: 0.56rem; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(var(--dim),0.5);
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(var(--dim),0.16); border-radius: 3px;
+    padding: 7px 11px; cursor: pointer; }
+  @media (max-width: 620px){
+    .ladder { top: auto; bottom: 54px; right: 0; left: 0; transform: none; flex-direction: row;
+      max-height: none; max-width: 100vw; overflow-x: auto; padding: 6px 10px; }
+    .rung { flex-direction: column; gap: 3px; }
+    .rung .lab { display: none; }
+  }
+</style>
+
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="head" id="head">
+  <div class="t">frozen music</div>
+  <div class="s">eigenmodes of a tensioned membrane</div>
+</div>
+<div class="mute" id="mute">sound: on</div>
+<div class="ladder" id="ladder"></div>
+<div class="hint"><b>click a mode</b> to see &amp; hear it &nbsp;·&nbsp; <b>strike the drum</b> to ring it</div>
+
+<script>
+(() => {
+  "use strict";
+  const cvs = document.getElementById("c");
+  const ctx = cvs.getContext("2d");
+  let W=0,H=0,DPR=1;
+
+  /* ===== Bessel J_m (stable iterative series) ===== */
+  function besselJ(m,x){
+    if(x===0) return m===0?1:0;
+    let mf=1; for(let i=2;i<=m;i++) mf*=i;
+    let term=Math.pow(x/2,m)/mf, sum=term; const h=(x/2)*(x/2);
+    for(let k=1;k<=60;k++){ term*=-h/(k*(k+m)); sum+=term; if(Math.abs(term)<1e-15)break; }
+    return sum;
+  }
+  const ZEROS={0:[2.4048,5.5201,8.6537,11.7915],1:[3.8317,7.0156,10.1735],2:[5.1356,8.4172,11.6198],
+               3:[6.3802,9.7610],4:[7.5883,11.0647],5:[8.7715]};
+  const f0z=ZEROS[0][0];
+  let MODES=[];
+  for(const m in ZEROS) ZEROS[m].forEach((z,ni)=>MODES.push({m:+m,n:ni+1,k:z,ratio:z/f0z}));
+  MODES.sort((a,b)=>a.ratio-b.ratio); MODES=MODES.slice(0,14);
+
+  /* ===== precompute each mode's amplitude field on a grid ===== */
+  const G=220, R=G/2-1, cxg=G/2, cyg=G/2;
+  const fields=[];           // Float32Array(G*G), normalized [-1,1], 0 outside disk
+  const nodeGlow=[];         // Float32Array(G*G), static glow at nodal set
+  for(const M of MODES){
+    const f=new Float32Array(G*G), ng=new Float32Array(G*G); let mx=1e-9;
+    for(let yy=0;yy<G;yy++)for(let xx=0;xx<G;xx++){
+      const dx=xx-cxg, dy=yy-cyg, r=Math.hypot(dx,dy);
+      const i=yy*G+xx;
+      if(r>R){ f[i]=0; continue; }
+      const th=Math.atan2(dy,dx);
+      const a=besselJ(M.m, M.k*r/R)*Math.cos(M.m*th);
+      f[i]=a; const aa=Math.abs(a); if(aa>mx)mx=aa;
+    }
+    for(let i=0;i<f.length;i++) f[i]/=mx;
+    for(let i=0;i<f.length;i++){ const dx=(i%G)-cxg, dy=((i/G)|0)-cyg; if(Math.hypot(dx,dy)>R){ng[i]=0;continue;}
+      ng[i]=Math.exp(-(f[i]*f[i])/(2*0.085*0.085)); }
+    fields.push(f); nodeGlow.push(ng);
+  }
+
+  /* ===== offscreen field canvas ===== */
+  const off=document.createElement("canvas"); off.width=G; off.height=G;
+  const octx=off.getContext("2d"); const img=octx.createImageData(G,G); const D=img.data;
+
+  /* ===== audio ===== */
+  let AC=null, master=null, soundOn=true;
+  const F0=196;  // fundamental pitch (Hz)
+  function ensureAudio(){ if(AC) return; AC=new (window.AudioContext||window.webkitAudioContext)();
+    master=AC.createGain(); master.gain.value=0.9; master.connect(AC.destination); }
+  function sing(ratio){ if(!soundOn) return; ensureAudio(); if(AC.state==="suspended")AC.resume();
+    const t=AC.currentTime, f=F0*ratio;
+    const o=AC.createOscillator(), g=AC.createGain();
+    o.type="sine"; o.frequency.value=f;
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.32,t+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0008,t+3.2);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+3.3);
+  }
+  function ring(coeffs){ if(!soundOn) return; ensureAudio(); if(AC.state==="suspended")AC.resume();
+    const t=AC.currentTime;
+    for(let k=0;k<MODES.length;k++){
+      const amp=Math.abs(coeffs[k]); if(amp<0.02) continue;
+      const f=F0*MODES[k].ratio, tau=Math.max(0.5, 2.2/MODES[k].ratio);
+      const o=AC.createOscillator(), g=AC.createGain();
+      o.type="sine"; o.frequency.value=f;
+      const peak=Math.min(0.5, amp*0.5/(1+0.3*k));
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(peak,t+0.006);
+      g.gain.exponentialRampToValueAtTime(0.0006,t+tau);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t+tau+0.1);
+    }
+  }
+  document.getElementById("mute").addEventListener("click",e=>{
+    soundOn=!soundOn; e.target.textContent="sound: "+(soundOn?"on":"off");
+    if(soundOn && AC && AC.state==="suspended") AC.resume();
+  });
+
+  /* ===== build the spectrum ladder, each rung a frozen Chladni figure ===== */
+  let selected=0; let strike=null;   // strike = {t0, a:[coeffs]}
+  const ladder=document.getElementById("ladder");
+  MODES.forEach((M,idx)=>{
+    const rung=document.createElement("div"); rung.className="rung"+(idx===0?" sel":""); rung.dataset.i=idx;
+    const tc=document.createElement("canvas"); tc.width=40; tc.height=40;
+    const tg=tc.getContext("2d"); const ti=tg.createImageData(40,40); const td=ti.data;
+    for(let yy=0;yy<40;yy++)for(let xx=0;xx<40;xx++){
+      const gx=Math.round(xx/40*G), gy=Math.round(yy/40*G), gi=gy*G+gx;
+      const v=nodeGlow[idx][gi], o=(yy*40+xx)*4;
+      const dx=xx-20,dy=yy-20; const inside=Math.hypot(dx,dy)<=19.5;
+      td[o]=255*v*(inside?1:0)*0.95; td[o+1]=200*v*(inside?1:0); td[o+2]=120*v*(inside?1:0); td[o+3]=255*(inside?1:0)*Math.max(0.12,v);
+    }
+    tg.putImageData(ti,0,0);
+    const lab=document.createElement("div"); lab.className="lab";
+    lab.innerHTML=`<b>(${M.m},${M.n})</b><br>×${M.ratio.toFixed(2)}`;
+    rung.appendChild(tc); rung.appendChild(lab);
+    rung.addEventListener("click",()=>selectMode(idx));
+    ladder.appendChild(rung);
+  });
+  function selectMode(idx){ selected=idx; strike=null;
+    document.querySelectorAll(".rung").forEach(r=>r.classList.toggle("sel",+r.dataset.i===idx));
+    sing(MODES[idx].ratio); document.getElementById("head").style.opacity="0.25";
+  }
+
+  /* ===== layout ===== */
+  let DISC={x:0,y:0,s:0};
+  function resize(){ DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+    cvs.width=Math.round(W*DPR); cvs.height=Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0);
+    const s=Math.min(W,H)*0.66; DISC={x:W/2, y:H/2, s}; }
+  addEventListener("resize",resize); resize();
+
+  /* strike: tap the drumhead → excite modes by their value at the tap point ===== */
+  cvs.addEventListener("pointerdown",e=>{
+    ensureAudio(); if(AC&&AC.state==="suspended")AC.resume();
+    const px=e.clientX-DISC.x, py=e.clientY-DISC.y, rr=Math.hypot(px,py)/(DISC.s/2);
+    if(rr>1){ return; }
+    const gx=Math.round((px/(DISC.s/2))*R+cxg), gy=Math.round((py/(DISC.s/2))*R+cyg);
+    const gi=Math.max(0,Math.min(G*G-1, gy*G+gx));
+    const a=MODES.map((M,k)=> fields[k][gi]);     // projection of impulse onto each mode
+    strike={t0:performance.now()/1000, a};
+    ring(a);
+    document.getElementById("head").style.opacity="0.25";
+  });
+
+  /* ===== render ===== */
+  let t0=performance.now();
+  function frame(now){
+    const t=(now-t0)/1000;
+    // background
+    ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalCompositeOperation="source-over";
+    const bg=ctx.createRadialGradient(DISC.x,DISC.y,0,DISC.x,DISC.y,Math.max(W,H)*0.7);
+    bg.addColorStop(0,"#0b0913"); bg.addColorStop(1,"#05040a"); ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+    // compute displacement field into offscreen image
+    if(strike){
+      const dt=performance.now()/1000-strike.t0;
+      // per-mode time coefficient (decaying oscillation)
+      const c=new Float32Array(MODES.length); let energy=0;
+      for(let k=0;k<MODES.length;k++){
+        const tau=Math.max(0.5,2.2/MODES[k].ratio), env=Math.exp(-dt/tau);
+        c[k]=strike.a[k]*env*Math.cos(2*Math.PI*(0.55*MODES[k].ratio)*dt);
+        energy+=Math.abs(strike.a[k])*env;
+      }
+      for(let i=0;i<G*G;i++){
+        let d=0; for(let k=0;k<MODES.length;k++){ const fk=fields[k]; if(c[k]) d+=c[k]*fk[i]; }
+        paintPixel(i,d,0);
+      }
+      if(energy<0.02) strike=null;
+    } else {
+      const M=MODES[selected], f=fields[selected], ng=nodeGlow[selected];
+      const phase=Math.cos(2*Math.PI*(0.55*M.ratio)*t);
+      for(let i=0;i<G*G;i++) paintPixel(i, f[i]*phase, ng[i]);
+    }
+    octx.putImageData(img,0,0);
+
+    // draw the membrane (scaled), with a soft additive bloom pass
+    const dx=DISC.x-DISC.s/2, dy=DISC.y-DISC.s/2;
+    ctx.globalCompositeOperation="lighter";
+    ctx.globalAlpha=0.5; ctx.filter="blur(6px)"; ctx.drawImage(off,dx,dy,DISC.s,DISC.s); ctx.filter="none";
+    ctx.globalAlpha=1; ctx.drawImage(off,dx,dy,DISC.s,DISC.s);
+    ctx.globalCompositeOperation="source-over";
+
+    // rim ring (the clamped edge — the founding node)
+    ctx.strokeStyle="rgba(232,196,130,0.18)"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(DISC.x,DISC.y,DISC.s/2,0,Math.PI*2); ctx.stroke();
+
+    requestAnimationFrame(frame);
+  }
+  function paintPixel(i,d,ng){
+    const o=i*4;
+    const dx=(i%G)-cxg, dy=((i/G)|0)-cyg;
+    if(Math.hypot(dx,dy)>R){ D[o]=D[o+1]=D[o+2]=D[o+3]=0; return; }
+    const mag=Math.min(1,Math.abs(d));
+    // living field: warm for +, cool for −
+    let r,g,b;
+    if(d>=0){ r=240*mag*0.5; g=150*mag*0.5; b=60*mag*0.5; }
+    else    { r=70*mag*0.5;  g=130*mag*0.5; b=230*mag*0.5; }
+    // frozen nodal glow (gold) — the structure
+    r+=255*ng*0.95; g+=205*ng; b+=120*ng;
+    D[o]=Math.min(255,r); D[o+1]=Math.min(255,g); D[o+2]=Math.min(255,b);
+    D[o+3]=Math.min(255, 30 + mag*150 + ng*230);
+  }
+
+  requestAnimationFrame(frame);
+  // sing the fundamental once audio is unlockable (on first interaction it will play)
+})();
+</script>

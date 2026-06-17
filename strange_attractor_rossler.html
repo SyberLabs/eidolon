@@ -1,0 +1,355 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>strange attractor — iv · bifurcation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,300&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: 244, 246, 252; --ui: 200, 212, 230; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #04040a; overflow: hidden; }
+  canvas { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; }
+
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    background: radial-gradient(120% 120% at 50% 44%, transparent 36%, rgba(2,2,7,0.5) 76%, rgba(1,1,4,0.95) 100%);
+    mix-blend-mode: multiply;
+  }
+
+  .frame {
+    position: fixed; left: 0; right: 0; top: 0; z-index: 3; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center;
+    padding-top: clamp(36px, 13vh, 130px);
+    transition: opacity 2.8s cubic-bezier(.4,0,.2,1);
+  }
+  .title {
+    font-family: "Cormorant Garamond", serif; font-weight: 300; font-style: italic;
+    color: rgba(var(--ink), 0.9);
+    font-size: clamp(1.9rem, 6.6vw, 5rem); letter-spacing: 0.18em; line-height: 1; text-align: center;
+    text-shadow: 0 0 30px rgba(150,180,255,0.3), 0 0 4px rgba(255,255,255,0.4);
+    white-space: nowrap;
+  }
+  .rule { width: clamp(60px, 12vw, 130px); height: 1px; margin: 1.2em 0 1.05em;
+    background: linear-gradient(90deg, transparent, rgba(var(--ink),0.5), transparent); }
+  .sub { font-family: "Space Mono", monospace; color: rgba(var(--ink), 0.38);
+    font-size: clamp(0.54rem, 1.4vw, 0.72rem); letter-spacing: 0.6em; text-indent: 0.6em; text-transform: uppercase; }
+
+  /* instrument panel */
+  .panel {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: max(26px, env(safe-area-inset-bottom)); z-index: 4;
+    width: min(560px, 86vw);
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+  }
+  .readout {
+    font-family: "Space Mono", monospace; font-size: 0.72rem; letter-spacing: 0.16em;
+    color: rgba(var(--ui), 0.62); white-space: nowrap;
+    display: flex; gap: 1.4em; align-items: baseline;
+  }
+  .readout b { color: rgba(var(--ink), 0.92); font-weight: normal; }
+  .readout .regime { letter-spacing: 0.28em; transition: color .5s; }
+  .slider-wrap { width: 100%; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 2px;
+    background: linear-gradient(90deg, rgba(80,120,220,0.6), rgba(80,200,200,0.55), rgba(120,210,130,0.5), rgba(245,200,80,0.55), rgba(250,80,60,0.7));
+    outline: none; border-radius: 2px; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 13px; height: 13px; border-radius: 50%;
+    background: rgba(var(--ink), 0.95); box-shadow: 0 0 12px rgba(255,255,255,0.5); cursor: pointer;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; border: none;
+    background: rgba(var(--ink), 0.95); box-shadow: 0 0 12px rgba(255,255,255,0.5); cursor: pointer;
+  }
+  .ticks { display: flex; justify-content: space-between; width: 100%; margin-top: 7px;
+    font-family: "Space Mono", monospace; font-size: 0.5rem; letter-spacing: 0.35em; text-indent: 0.35em;
+    text-transform: uppercase; color: rgba(var(--ui), 0.32); }
+</style>
+
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+
+<div class="frame" id="frame">
+  <div class="title">strange&nbsp;attractor</div>
+  <div class="rule"></div>
+  <div class="sub">iv&nbsp;·&nbsp;rössler&nbsp;·&nbsp;bifurcation</div>
+</div>
+
+<div class="panel">
+  <div class="readout">
+    <span>c&nbsp;=&nbsp;<b id="cval">5.70</b></span>
+    <span>λ₁&nbsp;≈&nbsp;<b id="lval">+0.000</b></span>
+    <span class="regime" id="regime">—</span>
+  </div>
+  <div class="slider-wrap">
+    <input type="range" id="knob" min="2" max="9" step="0.01" value="5.7">
+    <div class="ticks"><span>order</span><span>route to chaos</span><span>chaos</span></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const cvs = document.getElementById("c");
+  const ctx = cvs.getContext("2d", { alpha: false });
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cvs.width = Math.round(W*DPR); cvs.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    buildGrain();
+  }
+
+  /* ===== Rössler system + tangent (variational) integration ===== */
+  const A = 0.2, B = 0.2, dt = 0.04;
+  const N = 6500, TRANSIENT = 2500;
+  const px = new Float32Array(N), py = new Float32Array(N), pz = new Float32Array(N);
+  const stretch = new Float32Array(N);   // local expansion rate (FTLE proxy)
+  const heatIdx = new Int16Array(N);
+
+  // working arrays for rk4 on the 6-vector (state s + tangent v)
+  function deriv(s, v, c, ds, dv) {
+    const x=s[0], y=s[1], z=s[2];
+    ds[0] = -y - z; ds[1] = x + A*y; ds[2] = B + z*(x - c);
+    dv[0] = -v[1] - v[2];
+    dv[1] =  v[0] + A*v[1];
+    dv[2] =  z*v[0] + (x - c)*v[2];
+  }
+  const ds1=[0,0,0],dv1=[0,0,0],ds2=[0,0,0],dv2=[0,0,0],ds3=[0,0,0],dv3=[0,0,0],ds4=[0,0,0],dv4=[0,0,0],st=[0,0,0],vt=[0,0,0];
+  function rk4(s, v, c) {
+    deriv(s,v,c,ds1,dv1);
+    for (let i=0;i<3;i++){ st[i]=s[i]+0.5*dt*ds1[i]; vt[i]=v[i]+0.5*dt*dv1[i]; }
+    deriv(st,vt,c,ds2,dv2);
+    for (let i=0;i<3;i++){ st[i]=s[i]+0.5*dt*ds2[i]; vt[i]=v[i]+0.5*dt*dv2[i]; }
+    deriv(st,vt,c,ds3,dv3);
+    for (let i=0;i<3;i++){ st[i]=s[i]+dt*ds3[i]; vt[i]=v[i]+dt*dv3[i]; }
+    deriv(st,vt,c,ds4,dv4);
+    for (let i=0;i<3;i++){
+      s[i]+=dt/6*(ds1[i]+2*ds2[i]+2*ds3[i]+ds4[i]);
+      v[i]+=dt/6*(dv1[i]+2*dv2[i]+2*dv3[i]+dv4[i]);
+    }
+  }
+
+  // results of the latest integration
+  let LLE = 0, zmin = 0, zmax = 1, maxAbsR = 0.2;
+  let tCx = 0, tCy = 0, tCz = 0, tR = 1;   // target center + radius (fit)
+  let dCx = 0, dCy = 0, dCz = 0, dR = 1;   // smoothed/displayed
+
+  function recompute(c) {
+    let s = [0.1, 0.0, 0.0], v = [1, 0, 0];
+    for (let i=0;i<TRANSIENT;i++){ rk4(s,v,c); const n=Math.hypot(v[0],v[1],v[2]); v[0]/=n; v[1]/=n; v[2]/=n; }
+
+    let sum=0, mxr=0, zlo=Infinity, zhi=-Infinity;
+    let mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity,mnz=Infinity,mxz=-Infinity;
+    for (let i=0;i<N;i++){
+      rk4(s,v,c);
+      const n = Math.hypot(v[0],v[1],v[2]);
+      const r = Math.log(n)/dt;            // instantaneous expansion rate
+      v[0]/=n; v[1]/=n; v[2]/=n;
+      sum += r;
+      stretch[i] = r;
+      const ar = Math.abs(r); if (ar > mxr) mxr = ar;
+      px[i]=s[0]; py[i]=s[1]; pz[i]=s[2];
+      if (s[0]<mnx)mnx=s[0]; if (s[0]>mxx)mxx=s[0];
+      if (s[1]<mny)mny=s[1]; if (s[1]>mxy)mxy=s[1];
+      if (s[2]<mnz)mnz=s[2]; if (s[2]>mxz)mxz=s[2];
+      if (s[2]<zlo)zlo=s[2]; if (s[2]>zhi)zhi=s[2];
+    }
+    LLE = sum/N; zmin = zlo; zmax = (zhi>zlo+1e-6)?zhi:zlo+1e-6; maxAbsR = Math.max(0.12, mxr);
+
+    tCx=(mnx+mxx)/2; tCy=(mny+mxy)/2; tCz=(mnz+mxz)/2;
+    let rr=0;
+    for (let i=0;i<N;i++){ const a=px[i]-tCx,b=py[i]-tCy,c2=pz[i]-tCz; const d=a*a+b*b+c2*c2; if (d>rr) rr=d; }
+    tR = Math.sqrt(rr) || 1;
+
+    // ---- invariant → colour: global heat from λ₁, local heat from FTLE ----
+    const Hg = clamp(LLE / 0.075, 0, 1);
+    const rScale = 0.45;            // absolute FTLE scale; clamp handles rare realignment spikes
+    for (let i=0;i<N;i++){
+      const localHeat = clamp(0.5 + stretch[i]/(2*rScale), 0, 1);
+      // global λ₁ sets base temperature (the regime); local FTLE adds flares, but only once chaotic
+      const segHeat = clamp(0.16 + Hg*0.64 + (localHeat - 0.5)*(0.35 + 0.65*Hg), 0, 1);
+      let h = (segHeat*NH)|0; if (h>=NH) h=NH-1; if (h<0) h=0;
+      heatIdx[i] = h;
+    }
+    updateReadout(c, LLE, Hg);
+  }
+  const clamp = (v,a,b) => v<a?a:(v>b?b:v);
+
+  /* ===== thermal colour ramp (cool = ordered, hot = chaotic) ===== */
+  const NH = 20;
+  const stops = [
+    [0.00, 60, 92, 205], [0.30, 42,168,205], [0.55, 96,210,132],
+    [0.72,240,200, 72], [0.88,250,122, 44], [1.00,250, 54, 54],
+  ];
+  function ramp(t){
+    for (let i=1;i<stops.length;i++){
+      if (t<=stops[i][0]){
+        const a=stops[i-1], b=stops[i];
+        const f=(t-a[0])/(b[0]-a[0]);
+        return [a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f, a[3]+(b[3]-a[3])*f];
+      }
+    }
+    const l=stops[stops.length-1]; return [l[1],l[2],l[3]];
+  }
+  const heatRGB = [], heatCore = [];
+  for (let h=0;h<NH;h++){
+    const t=(h+0.5)/NH, c=ramp(t);
+    heatRGB.push(`${c[0]|0},${c[1]|0},${c[2]|0}`);
+    heatCore.push(`${(c[0]+(255-c[0])*0.4)|0},${(c[1]+(255-c[1])*0.4)|0},${(c[2]+(255-c[2])*0.4)|0}`);
+  }
+  const heatColorAt = t => { const c=ramp(clamp(t,0,1)); return `${c[0]|0},${c[1]|0},${c[2]|0}`; };
+
+  /* ===== brightness buckets + flow pulses ===== */
+  const NB = 7;
+  const bins = Array.from({length: NH*NB}, () => []);
+  const bucketAlpha = [0.012, 0.03, 0.06, 0.11, 0.2, 0.38, 0.7];
+  const heads = [
+    { speed: 0.052, phase: 0.00, peak: 1.00 },
+    { speed: 0.034, phase: 0.41, peak: 0.78 },
+    { speed: 0.071, phase: 0.73, peak: 0.62 },
+  ];
+  const wrap01 = v => v - Math.floor(v);
+  const sx = new Float32Array(N), sy = new Float32Array(N);
+
+  /* ===== film grain ===== */
+  let grain = document.createElement("canvas"), gctx = grain.getContext("2d");
+  function buildGrain(){
+    const S=160; grain.width=S; grain.height=S;
+    const img=gctx.createImageData(S,S), d=img.data;
+    for (let i=0;i<d.length;i+=4){ const v=(Math.random()*255)|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
+    gctx.putImageData(img,0,0);
+  }
+
+  /* ===== HUD ===== */
+  const elC = document.getElementById("cval"), elL = document.getElementById("lval"), elR = document.getElementById("regime");
+  function updateReadout(c, lle, Hg){
+    elC.textContent = c.toFixed(2);
+    elL.textContent = (lle>=0?"+":"") + lle.toFixed(3);
+    let name, t;
+    if (lle < 0.006) { name = "limit cycle"; t = 0.12; }
+    else if (lle < 0.028) { name = "edge of chaos"; t = 0.5; }
+    else { name = "chaos"; t = 0.85; }
+    elR.textContent = name;
+    elR.style.color = `rgb(${heatColorAt(t)})`;
+  }
+
+  // title fade
+  const frame = document.getElementById("frame");
+  setTimeout(() => { frame.style.opacity = "0.14"; }, 5600);
+
+  /* ===== slider — recompute throttled to one per frame ===== */
+  let pendingC = 5.7, dirty = true;
+  const knob = document.getElementById("knob");
+  knob.addEventListener("input", () => { pendingC = parseFloat(knob.value); dirty = true; frame.style.opacity = "0.14"; });
+
+  /* ===== render loop ===== */
+  const yawSpeed = reduced ? 0.04 : 0.10;
+  let t0 = performance.now();
+  let readPhase = 0, flickSmooth = 1;
+
+  function frameTick(now){
+    const t = (now - t0) / 1000;
+    if (dirty){ recompute(pendingC); dirty = false;
+      if (dCx===0 && dCy===0 && dR===1){ dCx=tCx; dCy=tCy; dCz=tCz; dR=tR; } }
+
+    // ease fit toward target so sliding morphs rather than pops
+    dCx += (tCx-dCx)*0.12; dCy += (tCy-dCy)*0.12; dCz += (tCz-dCz)*0.12; dR += (tR-dR)*0.12;
+
+    const Hg = clamp(LLE/0.075, 0, 1);
+
+    // flicker driven by the system's OWN signal: periodic→regular, chaotic→irregular
+    readPhase += (N/3.4) * (1/60);
+    const ri = ((readPhase|0) % N + N) % N;
+    const sig = clamp((pz[ri]-zmin)/(zmax-zmin), 0, 1);
+    flickSmooth += (sig - flickSmooth)*0.22;
+    const amp = 0.14 + 0.16*Hg;
+    const flick = (1 - amp) + amp*flickSmooth - (reduced?0:0.02*Math.random());
+
+    const yaw = t*yawSpeed;
+    const pitch = -0.52 + 0.20*Math.sin(t*0.16);
+    const cyA=Math.cos(yaw), syA=Math.sin(yaw), cxA=Math.cos(pitch), sxA=Math.sin(pitch);
+    const fitR = 0.40*Math.min(W,H), scale = fitR/dR, CX=W/2, CY=H/2;
+    const hp = heads.map(h => wrap01(t*h.speed + h.phase));
+
+    // project + brightness, sort into colour×brightness bins
+    for (let k=0;k<bins.length;k++) bins[k].length = 0;
+    for (let i=0;i<N-1;i++){
+      const ax=px[i]-dCx, ay=py[i]-dCy, az=pz[i]-dCz;
+      const x1=ax*cyA+az*syA, z1=-ax*syA+az*cyA, y1=ay;
+      const y2=y1*cxA-z1*sxA, z2=y1*sxA+z1*cxA;
+      const persp = 2.6 / (2.6 + z2/dR);
+      sx[i]=x1*scale*persp; sy[i]=y2*scale*persp;
+
+      let flow=0; const p=i/N;
+      for (let k=0;k<heads.length;k++){
+        const h=heads[k]; let fwd=wrap01(hp[k]-p); if (fwd>0.5) fwd-=1;
+        const core=Math.exp(-(fwd*fwd)/(2*0.012*0.012));
+        const wk=(fwd>0)?0.42*Math.exp(-(fwd*fwd)/(2*0.07*0.07)):0;
+        flow += h.peak*(core+wk);
+      }
+      let bv = 0.05 + flow + 0.04*(persp-0.85); if (bv>1) bv=1;
+      let bb=(bv*NB)|0; if (bb>=NB) bb=NB-1; if (bb<1) continue;
+      bins[heatIdx[i]*NB + bb].push(i);
+    }
+
+    // ---- field: near-black, faintly warmed by global heat ----
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.globalCompositeOperation = "source-over";
+    const hc = ramp(0.2 + Hg*0.6);
+    const bg = ctx.createRadialGradient(CX, H*0.46, 0, CX, H*0.46, Math.max(W,H)*0.8);
+    bg.addColorStop(0, `rgb(${(8+hc[0]*0.05)|0},${(8+hc[1]*0.05)|0},${(12+hc[2]*0.05)|0})`);
+    bg.addColorStop(1, "#04040a");
+    ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
+
+    // ---- accumulate light ----
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap="round"; ctx.lineJoin="round";
+    ctx.save(); ctx.translate(CX, CY);
+    const passes = [ {w:2.6, mul:0.5, core:false}, {w:0.7, mul:1.0, core:true} ];
+    for (let pi=0;pi<2;pi++){
+      const pass=passes[pi]; ctx.lineWidth=pass.w;
+      for (let h=0;h<NH;h++){
+        const col = pass.core ? heatCore[h] : heatRGB[h];
+        for (let b=1;b<NB;b++){
+          const list = bins[h*NB+b]; if (!list.length) continue;
+          let alpha = bucketAlpha[b]*pass.mul*flick; if (alpha<=0.004) continue; if (alpha>1) alpha=1;
+          ctx.strokeStyle = `rgba(${col},${alpha})`;
+          ctx.beginPath();
+          for (let j=0;j<list.length;j++){ const i=list[j]; ctx.moveTo(sx[i],sy[i]); ctx.lineTo(sx[i+1],sy[i+1]); }
+          ctx.stroke();
+        }
+      }
+    }
+    // comet heads — white-hot cores fading into the current regime colour
+    const midCol = heatColorAt(0.2 + Hg*0.6);
+    for (let k=0;k<heads.length;k++){
+      const idx = Math.min(N-1, (hp[k]*N)|0);
+      const X=sx[idx], Y=sy[idx], rad=(2.0+heads[k].peak*2.2)*4, ha=heads[k].peak*flick;
+      const g=ctx.createRadialGradient(X,Y,0,X,Y,rad);
+      g.addColorStop(0, `rgba(255,250,238,${0.9*ha})`);
+      g.addColorStop(0.3, `rgba(${midCol},${0.4*ha})`);
+      g.addColorStop(1, `rgba(${midCol},0)`);
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(X,Y,rad,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+
+    // grain
+    ctx.globalCompositeOperation = "overlay"; ctx.globalAlpha = 0.045;
+    const ox=(Math.random()*160)|0, oy=(Math.random()*160)|0;
+    for (let gx=-ox;gx<W;gx+=160) for (let gy=-oy;gy<H;gy+=160) ctx.drawImage(grain,gx,gy);
+    ctx.globalAlpha=1; ctx.globalCompositeOperation="source-over";
+
+    requestAnimationFrame(frameTick);
+  }
+
+  addEventListener("resize", resize);
+  resize();
+  requestAnimationFrame(frameTick);
+})();
+</script>

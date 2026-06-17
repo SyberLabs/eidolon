@@ -1,0 +1,205 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>tensegrity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,400&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: 244, 242, 236; --warm: 255, 206, 140; --cool: 150, 195, 235; --dim: 196, 200, 214; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #05050b; overflow: hidden; }
+  body { font-family: "Space Mono", monospace; }
+  canvas#c { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; z-index: 0; }
+  .vignette { position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    background: radial-gradient(125% 125% at 50% 48%, transparent 38%, rgba(3,3,9,0.5) 78%, rgba(1,1,5,0.95) 100%);
+    mix-blend-mode: multiply; }
+  .head { position: fixed; top: clamp(20px,4vh,40px); left: 50%; transform: translateX(-50%); z-index: 3;
+    text-align: center; pointer-events: none; transition: opacity 2s ease; }
+  .head .t { font-family: "Cormorant Garamond", serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.9rem,6vw,3.6rem); letter-spacing: 0.17em; color: rgba(var(--ink),0.92);
+    text-shadow: 0 0 28px rgba(150,195,235,0.28), 0 0 4px rgba(255,255,255,0.35); }
+  .head .s { margin-top: 0.9em; font-size: clamp(0.5rem,1.3vw,0.64rem); letter-spacing: 0.48em; text-indent:0.48em;
+    text-transform: uppercase; color: rgba(var(--dim),0.42); }
+  .hint { position: fixed; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+    z-index: 3; font-size: 0.58rem; letter-spacing: 0.24em; color: rgba(var(--dim),0.4); text-align: center;
+    pointer-events: none; white-space: nowrap; }
+  .hint b { color: rgba(var(--warm),0.75); font-weight: normal; }
+  .ladder { position: fixed; top: 50%; right: clamp(10px,2vw,26px); transform: translateY(-50%); z-index: 3;
+    display: flex; flex-direction: column; gap: 3px; max-height: 84vh; overflow-y: auto; padding: 4px; scrollbar-width: thin; }
+  .rung { display: flex; align-items: baseline; gap: 10px; padding: 6px 12px; cursor: pointer; min-width: 116px;
+    border: 1px solid transparent; border-radius: 4px; transition: background .3s, border-color .3s; }
+  .rung:hover { background: rgba(255,255,255,0.04); }
+  .rung.sel { background: rgba(150,195,235,0.1); border-color: rgba(var(--cool),0.45); }
+  .rung .r { font-size: 0.72rem; color: rgba(var(--ink),0.9); }
+  .rung .d { font-size: 0.5rem; letter-spacing: 0.12em; color: rgba(var(--dim),0.5); margin-left: auto; }
+  .mute { position: fixed; top: clamp(16px,3vh,28px); right: clamp(12px,2vw,26px); z-index: 4;
+    font-size: 0.56rem; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(var(--dim),0.5);
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(var(--dim),0.16); border-radius: 3px; padding: 7px 11px; cursor: pointer; }
+  @media (max-width: 640px){
+    .ladder { top:auto; bottom:50px; right:0; left:0; transform:none; flex-direction:row; max-height:none;
+      overflow-x:auto; padding:6px 10px; }
+    .rung { min-width:auto; flex-direction:column; gap:1px; padding:6px 10px; }
+    .rung .d { margin-left:0; }
+  }
+</style>
+
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="head" id="head"><div class="t">tensegrity</div><div class="s">normal modes of a floating structure</div></div>
+<div class="mute" id="mute">sound: on</div>
+<div class="ladder" id="ladder"></div>
+<div class="hint"><b>click a tone</b> to see it vibrate &nbsp;·&nbsp; <b>strike a node</b> to ring it</div>
+
+<script>
+(() => {
+  "use strict";
+  const cvs=document.getElementById("c"); const ctx=cvs.getContext("2d");
+  let W=0,H=0,DPR=1;
+
+  /* ===== geometry: six-strut tensegrity icosahedron ===== */
+  const P=1.6180339887;
+  const V0=[[0,1,P],[0,-1,P],[0,1,-P],[0,-1,-P],[1,P,0],[-1,P,0],[1,-P,0],[-1,-P,0],[P,0,1],[-P,0,1],[P,0,-1],[-P,0,-1]];
+  const NV=V0.length;
+  const struts=[[0,1],[2,3],[4,5],[6,7],[8,10],[9,11]];
+  const sset=new Set(struts.map(([a,b])=>a<b?a+'_'+b:b+'_'+a));
+  const dist=(a,b)=>Math.hypot(V0[a][0]-V0[b][0],V0[a][1]-V0[b][1],V0[a][2]-V0[b][2]);
+  const edges=[]; for(let i=0;i<NV;i++)for(let j=i+1;j<NV;j++) if(Math.abs(dist(i,j)-2)<1e-6) edges.push([i,j]);
+  const cables=edges.filter(([a,b])=>!sset.has(a<b?a+'_'+b:b+'_'+a));
+
+  /* ===== stiffness matrix + Jacobi eigensolve ===== */
+  const M=3*NV;
+  const K=Array.from({length:M},()=>new Float64Array(M));
+  function addSpring(i,j,k){ const dx=V0[j][0]-V0[i][0],dy=V0[j][1]-V0[i][1],dz=V0[j][2]-V0[i][2];
+    const L=Math.hypot(dx,dy,dz),u=[dx/L,dy/L,dz/L];
+    for(let r=0;r<3;r++)for(let c=0;c<3;c++){const v=k*u[r]*u[c];
+      K[3*i+r][3*i+c]+=v;K[3*j+r][3*j+c]+=v;K[3*i+r][3*j+c]-=v;K[3*j+r][3*i+c]-=v;} }
+  struts.forEach(([a,b])=>addSpring(a,b,4.0));
+  cables.forEach(([a,b])=>addSpring(a,b,1.0));
+  function jacobi(A){ const n=A.length; const a=A.map(r=>Float64Array.from(r));
+    const Vv=Array.from({length:n},(_,i)=>{const r=new Float64Array(n);r[i]=1;return r;});
+    for(let sw=0;sw<100;sw++){ let off=0; for(let p=0;p<n;p++)for(let q=p+1;q<n;q++)off+=a[p][q]*a[p][q]; if(off<1e-14)break;
+      for(let p=0;p<n;p++)for(let q=p+1;q<n;q++){ if(Math.abs(a[p][q])<1e-18)continue;
+        const th=(a[q][q]-a[p][p])/(2*a[p][q]); const t=Math.sign(th)/(Math.abs(th)+Math.sqrt(th*th+1));
+        const c=1/Math.sqrt(t*t+1),s=t*c;
+        for(let i=0;i<n;i++){const aip=a[i][p],aiq=a[i][q]; a[i][p]=c*aip-s*aiq; a[i][q]=s*aip+c*aiq;}
+        for(let i=0;i<n;i++){const api=a[p][i],aqi=a[q][i]; a[p][i]=c*api-s*aqi; a[q][i]=s*api+c*aqi;}
+        for(let i=0;i<n;i++){const vip=Vv[i][p],viq=Vv[i][q]; Vv[i][p]=c*vip-s*viq; Vv[i][q]=s*vip+c*viq;}
+      } }
+    return a.map((r,i)=>({ev:r[i], vec:Vv.map(row=>row[i])})); }
+  let spectrum=jacobi(K).filter(e=>e.ev>1e-3).sort((x,y)=>x.ev-y.ev);
+  // normalize each mode shape to unit max node displacement
+  spectrum.forEach(e=>{ let mx=1e-9; for(let i=0;i<NV;i++){const d=Math.hypot(e.vec[3*i],e.vec[3*i+1],e.vec[3*i+2]); if(d>mx)mx=d;}
+    e.vec=e.vec.map(v=>v/mx); e.f=Math.sqrt(e.ev); });
+  const fmin=spectrum[0].f;
+  // group degenerate modes by frequency
+  const groups=[]; for(const e of spectrum){ const g=groups.find(G=>Math.abs(G.f-e.f)<1e-3); if(g)g.modes.push(e); else groups.push({f:e.f, ratio:e.f/fmin, modes:[e]}); }
+
+  /* ===== audio ===== */
+  let AC=null,master=null,soundOn=true; const F0=165;
+  function ensureAudio(){ if(AC)return; AC=new (window.AudioContext||window.webkitAudioContext)();
+    master=AC.createGain(); master.gain.value=0.85; master.connect(AC.destination); }
+  function sing(ratio){ if(!soundOn)return; ensureAudio(); if(AC.state==="suspended")AC.resume();
+    const t=AC.currentTime,f=F0*ratio,o=AC.createOscillator(),g=AC.createGain();
+    o.type="sine"; o.frequency.value=f;
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.3,t+0.02); g.gain.exponentialRampToValueAtTime(0.0008,t+3.0);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+3.1); }
+  function ringChord(coeffs){ if(!soundOn)return; ensureAudio(); if(AC.state==="suspended")AC.resume();
+    const t=AC.currentTime;
+    groups.forEach((G,gi)=>{ const amp=coeffs[gi]; if(amp<0.02)return;
+      const f=F0*G.ratio, tau=Math.max(0.5,2.4/G.ratio), o=AC.createOscillator(), g=AC.createGain();
+      o.type="sine"; o.frequency.value=f; const peak=Math.min(0.4,amp*0.45);
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(peak,t+0.006); g.gain.exponentialRampToValueAtTime(0.0006,t+tau);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t+tau+0.1); }); }
+  document.getElementById("mute").addEventListener("click",e=>{ soundOn=!soundOn;
+    e.target.textContent="sound: "+(soundOn?"on":"off"); if(soundOn&&AC&&AC.state==="suspended")AC.resume(); });
+
+  /* ===== ladder ===== */
+  let selected=0, strike=null;
+  const ladder=document.getElementById("ladder");
+  groups.forEach((G,idx)=>{ const rung=document.createElement("div"); rung.className="rung"+(idx===0?" sel":""); rung.dataset.i=idx;
+    rung.innerHTML=`<span class="r">×${G.ratio.toFixed(2)}</span><span class="d">${G.modes.length>1?'⊳ '+G.modes.length:'·'}</span>`;
+    rung.addEventListener("click",()=>selectGroup(idx)); ladder.appendChild(rung); });
+  function selectGroup(idx){ selected=idx; strike=null;
+    document.querySelectorAll(".rung").forEach(r=>r.classList.toggle("sel",+r.dataset.i===idx));
+    sing(groups[idx].ratio); document.getElementById("head").style.opacity="0.25"; }
+
+  /* ===== layout + strike ===== */
+  let scale=1,CX=0,CY=0;
+  function resize(){ DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+    cvs.width=Math.round(W*DPR); cvs.height=Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0);
+    scale=Math.min(W,H)*0.30; CX=W/2; CY=H/2; }
+  addEventListener("resize",resize); resize();
+
+  const proj=new Array(NV); for(let i=0;i<NV;i++) proj[i]={x:0,y:0,z:0};
+  cvs.addEventListener("pointerdown",e=>{ ensureAudio(); if(AC&&AC.state==="suspended")AC.resume();
+    // nearest projected node to the click
+    let best=-1,bd=1e9; for(let i=0;i<NV;i++){ const dx=e.clientX-proj[i].x, dy=e.clientY-proj[i].y, d=dx*dx+dy*dy; if(d<bd){bd=d;best=i;} }
+    // impulse: push that node radially outward; project onto each group's modes
+    const imp=new Float64Array(M); const n=Math.hypot(V0[best][0],V0[best][1],V0[best][2]);
+    imp[3*best]=V0[best][0]/n; imp[3*best+1]=V0[best][1]/n; imp[3*best+2]=V0[best][2]/n;
+    const coeffs=groups.map(G=>{ let s=0; G.modes.forEach(m=>{ let dot=0; for(let j=0;j<M;j++)dot+=m.vec[j]*imp[j]; s+=dot*dot; }); return Math.sqrt(s); });
+    const mx=Math.max(...coeffs,1e-6); const norm=coeffs.map(c=>c/mx);
+    strike={t0:performance.now()/1000, coeffs:norm};
+    ringChord(norm); document.getElementById("head").style.opacity="0.25"; });
+
+  /* ===== grain ===== */
+  let grain=document.createElement("canvas"),gctx=grain.getContext("2d");
+  function buildGrain(){ const S=160;grain.width=S;grain.height=S;const im=gctx.createImageData(S,S),d=im.data;
+    for(let i=0;i<d.length;i+=4){const v=(Math.random()*255)|0;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;}gctx.putImageData(im,0,0);}
+  buildGrain();
+
+  /* ===== render ===== */
+  const disp=new Float64Array(M); let t0=performance.now();
+  function frame(now){
+    const t=(now-t0)/1000;
+    // compute node displacements
+    disp.fill(0);
+    if(strike){ const dt=performance.now()/1000-strike.t0; let energy=0;
+      groups.forEach((G,gi)=>{ const c=strike.coeffs[gi]; if(c<0.02)return; const tau=Math.max(0.5,2.4/G.ratio);
+        const env=Math.exp(-dt/tau); energy+=c*env; const osc=env*Math.cos(2*Math.PI*(0.5*G.ratio)*dt);
+        G.modes.forEach(m=>{ for(let j=0;j<M;j++) disp[j]+=c*osc*m.vec[j]*0.5; }); });
+      if(energy<0.02) strike=null;
+    } else { const G=groups[selected]; const amp=0.42;
+      // animate within the (possibly degenerate) eigenspace → shape precesses, one tone
+      G.modes.forEach((m,mi)=>{ const ph=2*Math.PI*(0.5*G.ratio)*t + mi*2.094;
+        const s=Math.sin(ph); for(let j=0;j<M;j++) disp[j]+=amp*s*m.vec[j]/Math.sqrt(G.modes.length); });
+    }
+    // rotate + project
+    const yaw=t*0.16, pitch=0.4*Math.sin(t*0.13);
+    const cyA=Math.cos(yaw),syA=Math.sin(yaw),cxA=Math.cos(pitch),sxA=Math.sin(pitch);
+    for(let i=0;i<NV;i++){ const px=V0[i][0]+disp[3*i], py=V0[i][1]+disp[3*i+1], pz=V0[i][2]+disp[3*i+2];
+      const x1=px*cyA+pz*syA, z1=-px*syA+pz*cyA, y1=py; const y2=y1*cxA-z1*sxA, z2=y1*sxA+z1*cxA;
+      const persp=2.8/(2.8+z2); proj[i].x=CX+x1*scale*persp; proj[i].y=CY+y2*scale*persp; proj[i].z=z2; }
+
+    // background
+    ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalCompositeOperation="source-over";
+    const bg=ctx.createRadialGradient(CX,CY,0,CX,CY,Math.max(W,H)*0.72);
+    bg.addColorStop(0,"#0a0a16"); bg.addColorStop(1,"#05050b"); ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+    ctx.globalCompositeOperation="lighter"; ctx.lineCap="round";
+
+    // cables (tension web) — faint cool
+    for(const [a,b] of cables){ const depth=((proj[a].z+proj[b].z)*0.5+P)/(2*P);
+      ctx.strokeStyle=`rgba(${ /*cool*/ '150,195,235'},${0.05+0.1*depth})`; ctx.lineWidth=0.6;
+      ctx.beginPath(); ctx.moveTo(proj[a].x,proj[a].y); ctx.lineTo(proj[b].x,proj[b].y); ctx.stroke(); }
+    // struts (compression) — bright warm, drawn thick + glow pass
+    for(let pass=0;pass<2;pass++){ const lw=pass?1.4:4.0, mul=pass?1:0.4;
+      for(const [a,b] of struts){ const depth=((proj[a].z+proj[b].z)*0.5+P)/(2*P);
+        ctx.strokeStyle=`rgba(255,206,140,${(0.3+0.5*depth)*mul})`; ctx.lineWidth=lw;
+        ctx.beginPath(); ctx.moveTo(proj[a].x,proj[a].y); ctx.lineTo(proj[b].x,proj[b].y); ctx.stroke(); } }
+    // node glints
+    for(let i=0;i<NV;i++){ const depth=(proj[i].z+P)/(2*P), rad=2+4*depth, a=0.4+0.5*depth;
+      const g=ctx.createRadialGradient(proj[i].x,proj[i].y,0,proj[i].x,proj[i].y,rad);
+      g.addColorStop(0,`rgba(255,250,240,${a})`); g.addColorStop(1,"rgba(255,210,150,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(proj[i].x,proj[i].y,rad,0,Math.PI*2); ctx.fill(); }
+
+    // grain
+    ctx.globalCompositeOperation="overlay"; ctx.globalAlpha=0.04;
+    const ox=(Math.random()*160)|0,oy=(Math.random()*160)|0;
+    for(let gx=-ox;gx<W;gx+=160)for(let gy=-oy;gy<H;gy+=160)ctx.drawImage(grain,gx,gy);
+    ctx.globalAlpha=1; ctx.globalCompositeOperation="source-over";
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>

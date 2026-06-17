@@ -1,0 +1,240 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>the third light</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,300&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: 246, 244, 250; --ui: 205, 210, 226; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #05050b; overflow: hidden; }
+  canvas { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; }
+
+  .vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    background: radial-gradient(125% 125% at 50% 46%, transparent 35%, rgba(3,3,9,0.5) 75%, rgba(1,1,5,0.95) 100%);
+    mix-blend-mode: multiply; }
+
+  .frame { position: fixed; left: 0; right: 0; top: 0; z-index: 3; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; padding-top: clamp(38px, 13vh, 130px);
+    transition: opacity 3s cubic-bezier(.4,0,.2,1); }
+  .title { font-family: "Cormorant Garamond", serif; font-weight: 300; font-style: italic;
+    color: rgba(var(--ink), 0.9); font-size: clamp(2rem, 7vw, 5.2rem); letter-spacing: 0.16em; line-height: 1; text-align: center;
+    text-shadow: 0 0 34px rgba(180,190,255,0.3), 0 0 5px rgba(255,255,255,0.4); white-space: nowrap; }
+  .rule { width: clamp(64px, 13vw, 140px); height: 1px; margin: 1.25em 0 1.05em;
+    background: linear-gradient(90deg, transparent, rgba(var(--ink),0.5), transparent); }
+  .sub { font-family: "Space Mono", monospace; color: rgba(var(--ink), 0.4);
+    font-size: clamp(0.54rem, 1.4vw, 0.72rem); letter-spacing: 0.52em; text-indent: 0.52em; text-transform: uppercase; }
+
+  .hud { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(28px, env(safe-area-inset-bottom));
+    z-index: 4; pointer-events: none; font-family: "Space Mono", monospace;
+    display: flex; gap: 1.6em; align-items: baseline; font-size: 0.64rem; letter-spacing: 0.2em; color: rgba(var(--ui),0.5); }
+  .hud .state { letter-spacing: 0.4em; text-indent: 0.4em; transition: color .8s; }
+  .hud b { color: rgba(var(--ink), 0.85); font-weight: normal; }
+</style>
+
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+
+<div class="frame" id="frame">
+  <div class="title">the&nbsp;third&nbsp;light</div>
+  <div class="rule"></div>
+  <div class="sub">phase synchrony across difference</div>
+</div>
+
+<div class="hud">
+  <span>κ&nbsp;=&nbsp;<b id="kval">0.000</b></span>
+  <span class="state" id="state">— — —</span>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const clamp = (v,a,b) => v<a?a:(v>b?b:v);
+  const cvs = document.getElementById("c");
+  const ctx = cvs.getContext("2d", { alpha: false });
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let W=0,H=0,DPR=1;
+  function resize(){
+    DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+    cvs.width=Math.round(W*DPR); cvs.height=Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); buildGrain();
+  }
+
+  /* ===== two non-identical Rössler oscillators, coupling κ breathing across the timeline ===== */
+  const a=0.16, b=0.1, cc=8.5, dt=0.02, wA=0.98, wB=1.02;
+  const N=7000, TRANSIENT=5000, KMIN=0.012, KMAX=0.06, CYCLES=2.5;
+  const kappaOf = u => 0.5*(KMIN+KMAX) + 0.5*(KMAX-KMIN)*Math.sin(2*Math.PI*CYCLES*u - Math.PI/2);
+
+  // stored geometry: A, B, mean M, per-segment sync, per-segment κ
+  const Ax=new Float32Array(N),Ay=new Float32Array(N),Az=new Float32Array(N);
+  const Bx=new Float32Array(N),By=new Float32Array(N),Bz=new Float32Array(N);
+  const Mx=new Float32Array(N),My=new Float32Array(N),Mz=new Float32Array(N);
+  const sync=new Float32Array(N), kap=new Float32Array(N);
+
+  function deriv(s,k,o){
+    const x1=s[0],y1=s[1],z1=s[2],x2=s[3],y2=s[4],z2=s[5];
+    o[0]=-wA*y1-z1;            o[1]=wA*x1+a*y1+k*(y2-y1);  o[2]=b+z1*(x1-cc);
+    o[3]=-wB*y2-z2;            o[4]=wB*x2+a*y2+k*(y1-y2);  o[5]=b+z2*(x2-cc);
+  }
+  const k1=new Array(6),k2=new Array(6),k3=new Array(6),k4=new Array(6),tm=new Array(6);
+  function rk4(s,k){
+    deriv(s,k,k1); for(let i=0;i<6;i++)tm[i]=s[i]+0.5*dt*k1[i];
+    deriv(tm,k,k2); for(let i=0;i<6;i++)tm[i]=s[i]+0.5*dt*k2[i];
+    deriv(tm,k,k3); for(let i=0;i<6;i++)tm[i]=s[i]+dt*k3[i];
+    deriv(tm,k,k4); for(let i=0;i<6;i++)s[i]+=dt/6*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);
+  }
+
+  let cenX=0,cenY=0,cenZ=0,modelR=1;
+  (function integrate(){
+    let s=[0.5,0.5,0.1,-0.4,0.3,0.1];
+    for(let i=0;i<TRANSIENT;i++) rk4(s, kappaOf(0));
+    let pa=Math.atan2(s[1],s[0]), pb=Math.atan2(s[4],s[3]), ema=0;
+    let mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity,mnz=Infinity,mxz=-Infinity;
+    for(let i=0;i<N;i++){
+      const u=i/N, k=kappaOf(u); kap[i]=k;
+      rk4(s,k);
+      const phA=Math.atan2(s[1],s[0]), phB=Math.atan2(s[4],s[3]);
+      let dA=phA-pa; if(dA>Math.PI)dA-=2*Math.PI; if(dA<-Math.PI)dA+=2*Math.PI;
+      let dB=phB-pb; if(dB>Math.PI)dB-=2*Math.PI; if(dB<-Math.PI)dB+=2*Math.PI;
+      ema += ((dA-dB)/dt - ema)*0.004;           // smoothed phase-slip rate
+      sync[i] = Math.exp(-(ema*ema)/(2*0.020*0.020)); // 1 = phase-locked, 0 = drifting
+      pa=phA; pb=phB;
+      Ax[i]=s[0];Ay[i]=s[1];Az[i]=s[2]; Bx[i]=s[3];By[i]=s[4];Bz[i]=s[5];
+      const mx=(s[0]+s[3])/2,my=(s[1]+s[4])/2,mz=(s[2]+s[5])/2; Mx[i]=mx;My[i]=my;Mz[i]=mz;
+      for(const v of [s[0],s[3]]){ if(v<mnx)mnx=v; if(v>mxx)mxx=v; }
+      for(const v of [s[1],s[4]]){ if(v<mny)mny=v; if(v>mxy)mxy=v; }
+      for(const v of [s[2],s[5]]){ if(v<mnz)mnz=v; if(v>mxz)mxz=v; }
+    }
+    // box-smooth the sync trace
+    const tmp=new Float32Array(N), R=22;
+    for(let i=0;i<N;i++){ let acc=0,n=0; for(let j=-R;j<=R;j++){const q=i+j; if(q>=0&&q<N){acc+=sync[q];n++;}} tmp[i]=acc/n; }
+    sync.set(tmp);
+    cenX=(mnx+mxx)/2; cenY=(mny+mxy)/2; cenZ=(mnz+mxz)/2;
+    let rr=0;
+    for(let i=0;i<N;i++){
+      for(const P of [[Ax[i],Ay[i],Az[i]],[Bx[i],By[i],Bz[i]]]){
+        const dx=P[0]-cenX,dy=P[1]-cenY,dz=P[2]-cenZ,d=dx*dx+dy*dy+dz*dz; if(d>rr)rr=d;
+      }
+    }
+    modelR=Math.sqrt(rr)||1;
+  })();
+
+  /* ===== colour: the two species + the emergent third light ===== */
+  const NS=5, NB=6;
+  const bucketAlpha=[0.02,0.05,0.1,0.19,0.34,0.62];
+  function ramp(base, whiteAmt){ // base[3] → NS shades lightened toward white
+    const out=[];
+    for(let s=0;s<NS;s++){ const f=(s/(NS-1))*whiteAmt;
+      out.push(`${(base[0]+(255-base[0])*f)|0},${(base[1]+(255-base[1])*f)|0},${(base[2]+(255-base[2])*f)|0}`); }
+    return out;
+  }
+  const colA = ramp([255,165,70], 0.55);   // oscillator A — amber
+  const colB = ramp([80,195,235], 0.55);   // oscillator B — cyan
+  const colM = ramp([255,238,205], 0.15);  // the third light — warm white-gold
+
+  const heads=[ {speed:0.05,phase:0.0,peak:1.0}, {speed:0.032,phase:0.5,peak:0.7} ];
+  const wrap01=v=>v-Math.floor(v);
+  const bins=Array.from({length:NS*NB},()=>[]);
+  const saX=new Float32Array(N),saY=new Float32Array(N),sbX=new Float32Array(N),sbY=new Float32Array(N),smX=new Float32Array(N),smY=new Float32Array(N);
+
+  let grain=document.createElement("canvas"),gctx=grain.getContext("2d");
+  function buildGrain(){ const S=160; grain.width=S;grain.height=S; const img=gctx.createImageData(S,S),d=img.data;
+    for(let i=0;i<d.length;i+=4){const v=(Math.random()*255)|0;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;} gctx.putImageData(img,0,0); }
+
+  const elK=document.getElementById("kval"), elS=document.getElementById("state"), frame=document.getElementById("frame");
+  setTimeout(()=>{ frame.style.opacity="0.14"; }, 6500);
+  const smoothstep=(e0,e1,x)=>{ const t=clamp((x-e0)/(e1-e0),0,1); return t*t*(3-2*t); };
+
+  const yawSpeed=reduced?0.04:0.09; let t0=performance.now(), hudTick=0;
+
+  function project(X,Y,Z,outX,outY,cyA,syA,cxA,sxA,scale){
+    for(let i=0;i<N;i++){
+      const ax=X[i]-cenX, ay=Y[i]-cenY, az=Z[i]-cenZ;
+      const x1=ax*cyA+az*syA, z1=-ax*syA+az*cyA, y1=ay;
+      const y2=y1*cxA-z1*sxA, z2=y1*sxA+z1*cxA;
+      const persp=2.6/(2.6+z2/modelR);
+      outX[i]=x1*scale*persp; outY[i]=y2*scale*persp;
+    }
+  }
+  function brightnessFlow(i,hp){
+    let flow=0; const p=i/N;
+    for(let k=0;k<heads.length;k++){ const h=heads[k]; let fwd=wrap01(hp[k]-p); if(fwd>0.5)fwd-=1;
+      const core=Math.exp(-(fwd*fwd)/(2*0.012*0.012)); const wk=(fwd>0)?0.42*Math.exp(-(fwd*fwd)/(2*0.07*0.07)):0;
+      flow+=h.peak*(core+wk); } return flow;
+  }
+  function drawBody(X,Y,shades,hp,flick,gate){
+    for(let k=0;k<bins.length;k++) bins[k].length=0;
+    for(let i=0;i<N-1;i++){
+      let bv=0.04+brightnessFlow(i,hp); if(bv>1)bv=1; let bb=(bv*NB)|0; if(bb>=NB)bb=NB-1; if(bb<1) continue;
+      let sl=(sync[i]*NS)|0; if(sl>=NS)sl=NS-1; if(sl<0)sl=0;
+      bins[sl*NB+bb].push(i);
+    }
+    const passes=[{w:2.6,mul:0.5},{w:0.7,mul:1.0}];
+    for(let pi=0;pi<2;pi++){ const pass=passes[pi]; ctx.lineWidth=pass.w;
+      for(let sl=0;sl<NS;sl++){ const col=shades[sl]; const gateMul=gate?smoothstep(0.25,0.8,sl/(NS-1)):1;
+        for(let bk=1;bk<NB;bk++){ const list=bins[sl*NB+bk]; if(!list.length)continue;
+          let alpha=bucketAlpha[bk]*pass.mul*flick*gateMul; if(alpha<=0.004)continue; if(alpha>1)alpha=1;
+          ctx.strokeStyle=`rgba(${col},${alpha})`; ctx.beginPath();
+          for(let j=0;j<list.length;j++){ const i=list[j]; ctx.moveTo(X[i],Y[i]); ctx.lineTo(X[i+1],Y[i+1]); }
+          ctx.stroke();
+        }
+      }
+    }
+  }
+  function drawHead(X,Y,idx,rgb,flick,mul){
+    const x=X[idx],y=Y[idx],rad=10,ha=flick*mul;
+    const g=ctx.createRadialGradient(x,y,0,x,y,rad);
+    g.addColorStop(0,`rgba(255,252,244,${0.9*ha})`); g.addColorStop(0.32,`rgba(${rgb},${0.4*ha})`); g.addColorStop(1,`rgba(${rgb},0)`);
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+  }
+
+  function tick(now){
+    const t=(now-t0)/1000;
+    const flick = 0.86 + 0.14*Math.sin(t*2.1)*(0.6+0.4*Math.sin(t*6.3+1.0)) - (reduced?0:0.03*Math.random());
+    const yaw=t*yawSpeed, pitch=-0.42+0.18*Math.sin(t*0.15);
+    const cyA=Math.cos(yaw),syA=Math.sin(yaw),cxA=Math.cos(pitch),sxA=Math.sin(pitch);
+    const scale=(0.40*Math.min(W,H))/modelR, CX=W/2, CY=H/2;
+    const hp=heads.map(h=>wrap01(t*h.speed+h.phase));
+
+    project(Ax,Ay,Az,saX,saY,cyA,syA,cxA,sxA,scale);
+    project(Bx,By,Bz,sbX,sbY,cyA,syA,cxA,sxA,scale);
+    project(Mx,My,Mz,smX,smY,cyA,syA,cxA,sxA,scale);
+
+    // field
+    ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalCompositeOperation="source-over";
+    const bg=ctx.createRadialGradient(CX,H*0.46,0,CX,H*0.46,Math.max(W,H)*0.82);
+    bg.addColorStop(0,"#0b0b18"); bg.addColorStop(1,"#05050b"); ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+    ctx.globalCompositeOperation="lighter"; ctx.lineCap="round"; ctx.lineJoin="round";
+    ctx.save(); ctx.translate(CX,CY);
+    drawBody(saX,saY,colA,hp,flick,false);   // species A
+    drawBody(sbX,sbY,colB,hp,flick,false);   // species B
+    drawBody(smX,smY,colM,hp,flick,true);    // the third light — gated by synchrony
+    // the two voices, and the bridge when it exists
+    const lead=Math.min(N-1,(hp[0]*N)|0);
+    drawHead(saX,saY,lead,"255,170,80",flick,1.0);
+    drawHead(sbX,sbY,lead,"110,205,240",flick,1.0);
+    drawHead(smX,smY,lead,"255,240,210",flick,sync[lead]);
+    ctx.restore();
+
+    // grain
+    ctx.globalCompositeOperation="overlay"; ctx.globalAlpha=0.045;
+    const ox=(Math.random()*160)|0,oy=(Math.random()*160)|0;
+    for(let gx=-ox;gx<W;gx+=160)for(let gy=-oy;gy<H;gy+=160)ctx.drawImage(grain,gx,gy);
+    ctx.globalAlpha=1; ctx.globalCompositeOperation="source-over";
+
+    // HUD reads the state at the travelling cursor
+    if((hudTick++ % 6)===0){
+      elK.textContent=kap[lead].toFixed(3);
+      const s=sync[lead];
+      if(s>0.6){ elS.textContent="⟡ phase-locked ⟡"; elS.style.color="rgba(255,236,200,0.9)"; }
+      else if(s>0.3){ elS.textContent="· · · finding · · ·"; elS.style.color="rgba(180,200,170,0.75)"; }
+      else { elS.textContent="— — drifting — —"; elS.style.color="rgba(150,170,210,0.6)"; }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  addEventListener("resize", resize); resize(); requestAnimationFrame(tick);
+})();
+</script>

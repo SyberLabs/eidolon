@@ -1,0 +1,221 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>eidola</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,400&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: 244, 246, 252; --dim: 188, 198, 220; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #04040a; overflow: hidden; }
+  body { font-family: "Space Mono", monospace; }
+  canvas { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; z-index: 0; }
+  .vignette { position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    background: radial-gradient(130% 130% at 50% 40%, transparent 40%, rgba(2,2,8,0.55) 80%, rgba(1,1,5,0.96) 100%);
+    mix-blend-mode: multiply; }
+
+  .stage { position: fixed; inset: 0; z-index: 2; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start; padding: clamp(22px,5vh,54px) 20px; }
+
+  .heading { text-align: center; }
+  .heading .mark { font-family: "Cormorant Garamond", serif; font-style: italic; font-weight: 300;
+    font-size: clamp(2.1rem, 7vw, 4.2rem); letter-spacing: 0.28em; text-indent: 0.28em;
+    color: rgba(var(--ink), 0.92); text-shadow: 0 0 30px rgba(170,190,255,0.28), 0 0 4px rgba(255,255,255,0.4); }
+  .heading .tag { margin-top: 1.1em; font-size: clamp(0.5rem,1.4vw,0.66rem); letter-spacing: 0.5em; text-indent: 0.5em;
+    text-transform: uppercase; color: rgba(var(--dim), 0.42); }
+
+  /* the orb occupies this reserved zone; canvas draws into it */
+  .orbzone { flex: 0 0 auto; width: 100%; height: clamp(170px, 28vh, 320px); }
+
+  nav { display: flex; flex-direction: column; gap: clamp(7px,1.2vh,13px); width: min(480px, 90vw); margin-top: clamp(4px,1.6vh,14px); }
+  .entry { position: relative; display: flex; align-items: baseline; gap: 1.1em;
+    padding: 9px 16px 9px 30px; text-decoration: none; border-radius: 3px;
+    border: 1px solid rgba(var(--dim), 0.10); background: rgba(255,255,255,0.012);
+    transition: border-color .5s, background .5s, transform .35s; }
+  .entry::before { content: ""; position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: rgba(var(--ink),0.85);
+    box-shadow: 0 0 8px rgba(200,220,255,0.7); transition: box-shadow .5s, background .5s; }
+  .entry .num { font-size: 0.62rem; letter-spacing: 0.26em; color: rgba(var(--dim), 0.55); min-width: 2.4em; }
+  .entry .name { font-family: "Cormorant Garamond", serif; font-style: italic; font-weight: 400;
+    font-size: 1.18rem; letter-spacing: 0.04em; color: rgba(var(--ink), 0.9); }
+  .entry .desc { margin-left: auto; font-size: 0.56rem; letter-spacing: 0.24em; text-transform: uppercase;
+    color: rgba(var(--dim), 0.4); white-space: nowrap; }
+  .entry:hover, .entry:focus-visible { border-color: rgba(var(--dim), 0.32); background: rgba(255,255,255,0.05);
+    transform: translateX(2px); outline: none; }
+  .entry:hover::before, .entry:focus-visible::before { background: #fff; box-shadow: 0 0 16px rgba(220,235,255,0.95); }
+  .entry:hover .name { color: #fff; }
+
+  .footer { margin-top: auto; padding-top: 14px; font-size: 0.5rem; letter-spacing: 0.4em; text-indent: 0.4em;
+    text-transform: uppercase; color: rgba(var(--dim), 0.26); text-align: center; }
+  @media (max-height: 760px){ .entry .desc { display: none; } .orbzone { height: clamp(135px, 22vh, 220px); } }
+</style>
+
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+
+<div class="stage">
+  <div class="heading">
+    <div class="mark">eidola</div>
+    <div class="tag">signatures of dynamical systems</div>
+  </div>
+  <div class="orbzone" id="orbzone"></div>
+  <nav id="nav">
+    <a class="entry" href="strange_attractor.html"><span class="num">i</span><span class="name">Aizawa</span><span class="desc">the organism</span></a>
+    <a class="entry" href="strange_attractor_thomas.html"><span class="num">ii</span><span class="name">Thomas</span><span class="desc">the script</span></a>
+    <a class="entry" href="strange_attractor_halvorsen.html"><span class="num">iii</span><span class="name">Halvorsen</span><span class="desc">the ornament</span></a>
+    <a class="entry" href="strange_attractor_rossler.html"><span class="num">iv</span><span class="name">Rossler</span><span class="desc">the bifurcation</span></a>
+    <a class="entry" href="the_third_light.html"><span class="num">v</span><span class="name">The Third Light</span><span class="desc">the eidolon</span></a>
+    <a class="entry" href="tensegrity.html"><span class="num">vi</span><span class="name">Tensegrity</span><span class="desc">the structure</span></a>
+    <a class="entry" href="frozen_music.html"><span class="num">vii</span><span class="name">Frozen Music</span><span class="desc">the resonance</span></a>
+  </nav>
+  <div class="footer">a portal / choose a form to enter</div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const cvs = document.getElementById("c");
+  const ctx = cvs.getContext("2d", { alpha: false });
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const orbzone = document.getElementById("orbzone");
+  const entries = [...document.querySelectorAll(".entry")];
+
+  let W=0,H=0,DPR=1;
+  function resize(){ DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+    cvs.width=Math.round(W*DPR); cvs.height=Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); buildGrain(); }
+
+  /* ===== geodesic icosphere (Buckminster Fuller) ===== */
+  function norm(v){ const l=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; }
+  function icosphere(order){
+    const t=(1+Math.sqrt(5))/2;
+    let V=[[-1,t,0],[1,t,0],[-1,-t,0],[1,-t,0],[0,-1,t],[0,1,t],[0,-1,-t],[0,1,-t],[t,0,-1],[t,0,1],[-t,0,-1],[-t,0,1]].map(norm);
+    let F=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
+    const cache=new Map();
+    const mid=(a,b)=>{ const key=a<b?a*100000+b:b*100000+a; if(cache.has(key))return cache.get(key);
+      const v=norm([(V[a][0]+V[b][0])/2,(V[a][1]+V[b][1])/2,(V[a][2]+V[b][2])/2]); V.push(v); const i=V.length-1; cache.set(key,i); return i; };
+    for(let o=0;o<order;o++){ const NF=[]; for(const f of F){ const ab=mid(f[0],f[1]),bc=mid(f[1],f[2]),ca=mid(f[2],f[0]);
+      NF.push([f[0],ab,ca],[f[1],bc,ab],[f[2],ca,bc],[ab,bc,ca]); } F=NF; }
+    const es=new Set(), E=[];
+    for(const f of F){ const pr=[[f[0],f[1]],[f[1],f[2]],[f[2],f[0]]];
+      for(const[a,b] of pr){ const k=a<b?a+"_"+b:b+"_"+a; if(!es.has(k)){es.add(k); E.push([a,b]);} } }
+    return {V,E};
+  }
+  const SPHERE = icosphere(2);                 // 162 nodes, 480 struts
+  const NV = SPHERE.V.length;
+  const vx=new Float32Array(NV), vy=new Float32Array(NV), vz=new Float32Array(NV); // projected scratch
+
+  /* ===== grain ===== */
+  let grain=document.createElement("canvas"), gctx=grain.getContext("2d");
+  function buildGrain(){ const S=160; grain.width=S;grain.height=S; const im=gctx.createImageData(S,S),d=im.data;
+    for(let i=0;i<d.length;i+=4){const v=(Math.random()*255)|0;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;} gctx.putImageData(im,0,0); }
+
+  /* hover tracking → which thread brightens */
+  let hover = -1;
+  entries.forEach((el,i)=>{
+    const on=()=>hover=i, off=()=>{ if(hover===i) hover=-1; };
+    el.addEventListener("pointerenter",on); el.addEventListener("pointerleave",off);
+    el.addEventListener("focus",on); el.addEventListener("blur",off);
+  });
+
+  const hash = i => { const s=Math.sin(i*12.9898)*43758.5453; return s-Math.floor(s); };
+  let t0=performance.now();
+
+  function tick(now){
+    const t=(now-t0)/1000;
+    const breath = 1 + 0.035*Math.sin(t*0.7);
+    const flick = 0.92 + 0.08*Math.sin(t*1.7)*(0.6+0.4*Math.sin(t*5.1+0.6));
+
+    // orb centre tracks its reserved zone, with a slow wisp-like drift
+    const zr = orbzone.getBoundingClientRect();
+    const OCX = W/2 + 5*Math.sin(t*0.23);
+    const OCY = zr.top + zr.height*0.5 + 4*Math.sin(t*0.31+1.0);
+    const R = Math.min(zr.height*0.42, Math.min(W,H)*0.18) * breath;
+
+    // rotation
+    const yaw=t*(reduced?0.05:0.13), pitch=0.38*Math.sin(t*0.17);
+    const cyA=Math.cos(yaw),syA=Math.sin(yaw),cxA=Math.cos(pitch),sxA=Math.sin(pitch);
+    for(let i=0;i<NV;i++){
+      const p=SPHERE.V[i]; const x1=p[0]*cyA+p[2]*syA, z1=-p[0]*syA+p[2]*cyA, y1=p[1];
+      const y2=y1*cxA-z1*sxA, z2=y1*sxA+z1*cxA;
+      const persp=1/(1-0.16*z2);
+      vx[i]=OCX+x1*R*persp; vy[i]=OCY+y2*R*persp; vz[i]=z2;
+    }
+
+    // ---- field ----
+    ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalCompositeOperation="source-over";
+    const bg=ctx.createRadialGradient(OCX,OCY,0,OCX,OCY,Math.max(W,H)*0.85);
+    bg.addColorStop(0,"#0a0a16"); bg.addColorStop(1,"#04040a"); ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+    ctx.globalCompositeOperation="lighter"; ctx.lineCap="round"; ctx.lineJoin="round";
+
+    // ---- constellation threads: orb → each entry, with light flowing outward ----
+    for(let i=0;i<entries.length;i++){
+      const r=entries[i].getBoundingClientRect();
+      const tx=r.left+15, ty=r.top+r.height/2;     // the entry's node dot
+      const base = (hover===i)?0.5:0.16;
+      ctx.strokeStyle=`rgba(200,220,255,${base*flick})`; ctx.lineWidth=(hover===i)?1.1:0.6;
+      ctx.beginPath(); ctx.moveTo(OCX,OCY); ctx.lineTo(tx,ty); ctx.stroke();
+      // travelling pulse flowing from orb toward the work
+      const pulses=(hover===i)?2:1;
+      for(let q=0;q<pulses;q++){
+        const ph=((t*0.32 + i*0.21 + q*0.5)%1);
+        const px=OCX+(tx-OCX)*ph, py=OCY+(ty-OCY)*ph;
+        const a=(hover===i?0.9:0.5)*flick*Math.sin(ph*Math.PI);
+        const g=ctx.createRadialGradient(px,py,0,px,py,7);
+        g.addColorStop(0,`rgba(255,255,255,${a})`); g.addColorStop(1,"rgba(180,210,255,0)");
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(px,py,7,0,Math.PI*2); ctx.fill();
+      }
+    }
+
+    // ---- the orb: soft halo (wisp) ----
+    const halo=ctx.createRadialGradient(OCX,OCY,0,OCX,OCY,R*2.7);
+    halo.addColorStop(0,`rgba(225,235,255,${0.16*flick})`);
+    halo.addColorStop(0.32,`rgba(150,180,245,${0.07*flick})`);
+    halo.addColorStop(1,"rgba(120,160,255,0)");
+    ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(OCX,OCY,R*2.7,0,Math.PI*2); ctx.fill();
+
+    // ---- geodesic struts (depth-shaded) ----
+    for(let pass=0;pass<2;pass++){
+      const lw = pass===0?2.2:0.7, mul = pass===0?0.45:1.0;
+      ctx.lineWidth=lw;
+      for(let e=0;e<SPHERE.E.length;e++){
+        const a=SPHERE.E[e][0], b=SPHERE.E[e][1];
+        const depth=((vz[a]+vz[b])*0.5+1)/2;        // 0 far … 1 near
+        let al=(0.05+0.16*depth*depth)*mul*flick; if(al<=0.004) continue;
+        ctx.strokeStyle=`rgba(${pass?'255,255,255':'205,225,255'},${al})`;
+        ctx.beginPath(); ctx.moveTo(vx[a],vy[a]); ctx.lineTo(vx[b],vy[b]); ctx.stroke();
+      }
+    }
+
+    // ---- node glints (struts meeting — the star points), front hemisphere, twinkling ----
+    for(let i=0;i<NV;i++){
+      if(vz[i]<0.02) continue;
+      const depth=(vz[i]+1)/2;
+      const tw=0.55+0.45*Math.sin(t*2.2 + hash(i)*6.28);
+      const a=0.5*depth*depth*tw*flick; if(a<=0.01) continue;
+      const rad=1.6+2.2*depth;
+      const g=ctx.createRadialGradient(vx[i],vy[i],0,vx[i],vy[i],rad);
+      g.addColorStop(0,`rgba(255,255,255,${a})`); g.addColorStop(1,"rgba(190,215,255,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(vx[i],vy[i],rad,0,Math.PI*2); ctx.fill();
+    }
+
+    // ---- star-heart core ----
+    const core=ctx.createRadialGradient(OCX,OCY,0,OCX,OCY,R*0.6);
+    core.addColorStop(0,`rgba(255,252,244,${0.5*flick})`);
+    core.addColorStop(0.5,`rgba(235,240,255,${0.12*flick})`);
+    core.addColorStop(1,"rgba(220,230,255,0)");
+    ctx.fillStyle=core; ctx.beginPath(); ctx.arc(OCX,OCY,R*0.6,0,Math.PI*2); ctx.fill();
+
+    // grain
+    ctx.globalCompositeOperation="overlay"; ctx.globalAlpha=0.04;
+    const ox=(Math.random()*160)|0,oy=(Math.random()*160)|0;
+    for(let gx=-ox;gx<W;gx+=160)for(let gy=-oy;gy<H;gy+=160)ctx.drawImage(grain,gx,gy);
+    ctx.globalAlpha=1; ctx.globalCompositeOperation="source-over";
+
+    requestAnimationFrame(tick);
+  }
+
+  addEventListener("resize", resize); resize(); requestAnimationFrame(tick);
+})();
+</script>

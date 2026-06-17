@@ -1,0 +1,368 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>strange attractor — iii</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,300&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: 255, 238, 210; --gold: 232, 192, 122; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #05030a; overflow: hidden; }
+  body { cursor: none; }
+  body.awake { cursor: default; }
+  canvas { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; }
+
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    background:
+      radial-gradient(120% 120% at 50% 47%, transparent 34%, rgba(4,2,8,0.5) 74%, rgba(2,1,5,0.95) 100%);
+    mix-blend-mode: multiply;
+  }
+
+  .frame {
+    position: fixed; inset: 0; z-index: 3; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: opacity 2.8s cubic-bezier(.4,0,.2,1);
+  }
+  .title {
+    font-family: "Cormorant Garamond", serif;
+    font-weight: 300; font-style: italic;
+    color: rgba(var(--ink), 0.9);
+    font-size: clamp(2.1rem, 7.4vw, 5.6rem);
+    letter-spacing: 0.18em; line-height: 1; text-align: center;
+    text-shadow: 0 0 32px rgba(232,170,70,0.42), 0 0 5px rgba(255,220,150,0.5);
+    white-space: nowrap;
+  }
+  .title .lo { display: inline-block; }
+  .rule {
+    width: clamp(70px, 14vw, 150px); height: 1px; margin: 1.4em 0 1.25em;
+    background: linear-gradient(90deg, transparent, rgba(var(--gold),0.6), transparent);
+  }
+  .sub {
+    font-family: "Space Mono", monospace;
+    color: rgba(var(--gold), 0.5);
+    font-size: clamp(0.56rem, 1.5vw, 0.74rem);
+    letter-spacing: 0.62em; text-indent: 0.62em; text-transform: uppercase;
+  }
+  .caption {
+    position: fixed; left: 50%; bottom: max(22px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+    z-index: 3; pointer-events: none;
+    font-family: "Space Mono", monospace;
+    color: rgba(var(--gold), 0.32);
+    font-size: 0.6rem; letter-spacing: 0.42em; text-indent: 0.42em;
+    text-transform: uppercase; white-space: nowrap;
+    transition: opacity 2.2s ease;
+  }
+
+  .controls {
+    position: fixed; top: max(20px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    z-index: 4; display: flex; gap: 10px; opacity: 0; pointer-events: none;
+    transition: opacity 1.4s ease;
+  }
+  body.awake .controls { opacity: 1; pointer-events: auto; }
+  .mode {
+    font-family: "Space Mono", monospace; font-size: 0.56rem;
+    letter-spacing: 0.28em; text-indent: 0.28em; text-transform: uppercase;
+    color: rgba(var(--gold), 0.55);
+    background: rgba(232,192,122,0.03);
+    border: 1px solid rgba(var(--gold), 0.16);
+    border-radius: 2px; padding: 9px 14px; cursor: pointer;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    transition: color .35s, border-color .35s, background .35s;
+  }
+  .mode:hover { color: rgba(var(--ink), 0.85); border-color: rgba(var(--gold), 0.35); }
+  .mode.active {
+    color: rgba(var(--ink), 0.95);
+    border-color: rgba(var(--gold), 0.55);
+    background: rgba(232,192,122,0.09);
+  }
+</style>
+
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+
+<div class="controls" id="controls">
+  <button class="mode active" data-mode="3d">3D mirror</button>
+  <button class="mode" data-mode="kaleido">Kaleidoscope</button>
+  <button class="mode" data-mode="bilateral">Bilateral</button>
+</div>
+
+<div class="frame" id="frame">
+  <div class="title">strange&nbsp;<span class="lo">attractor</span></div>
+  <div class="rule"></div>
+  <div class="sub">iii&nbsp;·&nbsp;halvorsen&nbsp;system</div>
+</div>
+<div class="caption" id="caption">✶ &nbsp; 3d mirror &nbsp; ✶</div>
+
+<script>
+(() => {
+  "use strict";
+  const cvs = document.getElementById("c");
+  const ctx = cvs.getContext("2d", { alpha: false });
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cvs.width = Math.round(W * DPR);
+    cvs.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    buildGrain();
+  }
+
+  /* ---- the Halvorsen attractor (RK4 — it's stiff and bolts to infinity under Euler) ---- */
+  const Av = 1.4, N = 9000, dt = 0.005, TRANSIENT = 2000;
+  const px = new Float32Array(N), py = new Float32Array(N), pz = new Float32Array(N);
+
+  function f(x, y, z, o) {
+    o[0] = -Av*x - 4*y - 4*z - y*y;
+    o[1] = -Av*y - 4*z - 4*x - z*z;
+    o[2] = -Av*z - 4*x - 4*y - x*x;
+  }
+  (function integrate() {
+    let x = -1.48, y = -1.51, z = 2.04;
+    const k1=[0,0,0], k2=[0,0,0], k3=[0,0,0], k4=[0,0,0];
+    function step() {
+      f(x, y, z, k1);
+      f(x + 0.5*dt*k1[0], y + 0.5*dt*k1[1], z + 0.5*dt*k1[2], k2);
+      f(x + 0.5*dt*k2[0], y + 0.5*dt*k2[1], z + 0.5*dt*k2[2], k3);
+      f(x + dt*k3[0],     y + dt*k3[1],     z + dt*k3[2],     k4);
+      x += dt/6*(k1[0] + 2*k2[0] + 2*k3[0] + k4[0]);
+      y += dt/6*(k1[1] + 2*k2[1] + 2*k3[1] + k4[1]);
+      z += dt/6*(k1[2] + 2*k2[2] + 2*k3[2] + k4[2]);
+    }
+    for (let i = 0; i < TRANSIENT; i++) step();
+    for (let i = 0; i < N; i++) { step(); px[i] = x; py[i] = y; pz[i] = z; }
+  })();
+
+  let cxm = 0, cym = 0, czm = 0;
+  for (let i = 0; i < N; i++) { cxm += px[i]; cym += py[i]; czm += pz[i]; }
+  cxm /= N; cym /= N; czm /= N;
+  let modelR = 0;
+  for (let i = 0; i < N; i++) {
+    const a = px[i]-cxm, b = py[i]-cym, c = pz[i]-czm;
+    const r = a*a + b*b + c*c; if (r > modelR) modelR = r;
+  }
+  modelR = Math.sqrt(modelR);
+  const FOCAL = modelR * 2.6;
+
+  // base + twin projection buffers
+  const sx = new Float32Array(N), sy = new Float32Array(N), pp = new Float32Array(N);
+  const sx2 = new Float32Array(N), sy2 = new Float32Array(N), pp2 = new Float32Array(N);
+  const briB = new Float32Array(N), briT = new Float32Array(N);
+
+  const NB = 7;
+  const bktsB = Array.from({ length: NB }, () => []);
+  const bktsT = Array.from({ length: NB }, () => []);
+  const bucketAlpha = [0.012, 0.03, 0.06, 0.11, 0.2, 0.38, 0.7];
+
+  const heads = [
+    { speed: 0.052, phase: 0.00, peak: 1.00 },
+    { speed: 0.034, phase: 0.41, peak: 0.78 },
+    { speed: 0.071, phase: 0.73, peak: 0.62 },
+  ];
+  const wrap01 = v => v - Math.floor(v);
+
+  // palettes
+  const goldPasses   = [ { w: 2.6, mul: 0.5, col: "255,168,52" }, { w: 0.7, mul: 1.0, col: "255,222,150" } ];
+  const silverPasses = [ { w: 2.6, mul: 0.5, col: "150,170,210" }, { w: 0.7, mul: 1.0, col: "205,220,245" } ];
+
+  let grain = document.createElement("canvas"), gctx = grain.getContext("2d");
+  function buildGrain() {
+    const S = 160; grain.width = S; grain.height = S;
+    const img = gctx.createImageData(S, S), d = img.data;
+    for (let i = 0; i < d.length; i += 4) { const v = (Math.random()*255)|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
+    gctx.putImageData(img, 0, 0);
+  }
+
+  /* ---- modes + UI ---- */
+  let mode = "3d";
+  const frame = document.getElementById("frame");
+  const caption = document.getElementById("caption");
+  const controls = document.getElementById("controls");
+  const labels = { "3d": "3d mirror", "kaleido": "kaleidoscope", "bilateral": "bilateral fold" };
+
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll(".mode").forEach(el => el.classList.toggle("active", el.dataset.mode === m));
+    caption.textContent = "✶   " + labels[m] + "   ✶";
+    wake();
+  }
+  controls.querySelectorAll(".mode").forEach(el =>
+    el.addEventListener("click", () => setMode(el.dataset.mode)));
+  window.addEventListener("keydown", e => {
+    if (e.key === "1") setMode("3d");
+    else if (e.key === "2") setMode("kaleido");
+    else if (e.key === "3") setMode("bilateral");
+  });
+
+  let wakeTimer;
+  function wake() {
+    document.body.classList.add("awake");
+    frame.style.opacity = "1"; caption.style.opacity = "1";
+    clearTimeout(wakeTimer);
+    wakeTimer = setTimeout(() => {
+      document.body.classList.remove("awake");
+      frame.style.opacity = "0.16"; caption.style.opacity = "0.55";
+    }, 4200);
+  }
+  window.addEventListener("pointermove", wake, { passive: true });
+  window.addEventListener("pointerdown", wake, { passive: true });
+
+  /* ---- drawing helpers (coords are center-relative; caller sets the transform) ---- */
+  function strokeForm(X, Y, bkts, passes, mul, flick) {
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (let pi = 0; pi < passes.length; pi++) {
+      const pass = passes[pi];
+      ctx.lineWidth = pass.w;
+      for (let b = 1; b < NB; b++) {
+        const list = bkts[b]; if (!list.length) continue;
+        let alpha = bucketAlpha[b] * pass.mul * mul * flick;
+        if (alpha <= 0.004) continue; if (alpha > 1) alpha = 1;
+        ctx.strokeStyle = `rgba(${pass.col},${alpha})`;
+        ctx.beginPath();
+        for (let j = 0; j < list.length; j++) {
+          const i = list[j];
+          ctx.moveTo(X[i], Y[i]); ctx.lineTo(X[i+1], Y[i+1]);
+        }
+        ctx.stroke();
+      }
+    }
+  }
+  function drawHeads(X, Y, hp, mul, flick) {
+    for (let k = 0; k < heads.length; k++) {
+      const idx = Math.min(N - 1, (hp[k] * N) | 0);
+      const cx = X[idx], cy = Y[idx];
+      const rad = (2.0 + heads[k].peak * 2.2) * 4;
+      const ha = heads[k].peak * flick * mul;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      g.addColorStop(0, `rgba(255,246,224,${0.92*ha})`);
+      g.addColorStop(0.28, `rgba(255,182,72,${0.45*ha})`);
+      g.addColorStop(1, "rgba(255,150,40,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  function bucketize(bri, bkts) {
+    for (let b = 0; b < NB; b++) bkts[b].length = 0;
+    for (let i = 0; i < N - 1; i++) {
+      let v = bri[i]; if (v > 1) v = 1;
+      let bk = (v * NB) | 0; if (bk >= NB) bk = NB - 1;
+      bkts[bk].push(i);
+    }
+  }
+
+  const yawSpeed = reduced ? 0.05 : 0.12;
+  const flickAmp = reduced ? 0.06 : 0.17;
+  let t0 = performance.now();
+
+  function frameTick(now) {
+    const t = (now - t0) / 1000;
+    const flick = 1 - flickAmp * (0.5 + 0.5*Math.sin(t*2.3)) * (0.6 + 0.4*Math.sin(t*7.9+1.3))
+                  - (reduced ? 0 : 0.04*Math.random());
+
+    const yaw = t * yawSpeed;
+    const pitch = -0.24 + 0.30 * Math.sin(t * 0.19);
+    const cyA = Math.cos(yaw), syA = Math.sin(yaw);
+    const cxA = Math.cos(pitch), sxA = Math.sin(pitch);
+
+    const fitR = 0.40 * Math.min(W, H);
+    const scale = fitR / modelR;
+    const CX = W / 2, CY = H / 2;
+    const need3d = (mode === "3d");
+
+    const hp = heads.map(h => wrap01(t * h.speed + h.phase));
+
+    for (let i = 0; i < N; i++) {
+      const ax = px[i]-cxm, ay = py[i]-cym, az = pz[i]-czm;
+      // base
+      let x1 = ax*cyA + az*syA, z1 = -ax*syA + az*cyA, y1 = ay;
+      let y2 = y1*cxA - z1*sxA, z2 = y1*sxA + z1*cxA;
+      let persp = FOCAL / (FOCAL + z2);
+      sx[i] = x1*scale*persp; sy[i] = y2*scale*persp; pp[i] = persp;
+
+      // directional flow along the thread
+      let flow = 0; const p = i / N;
+      for (let k = 0; k < heads.length; k++) {
+        const h = heads[k]; let fwd = wrap01(hp[k] - p); if (fwd > 0.5) fwd -= 1;
+        const core = Math.exp(-(fwd*fwd)/(2*0.012*0.012));
+        let wake = (fwd > 0) ? 0.42*Math.exp(-(fwd*fwd)/(2*0.07*0.07)) : 0;
+        flow += h.peak * (core + wake);
+      }
+      briB[i] = 0.06 + flow + 0.16*(persp - 0.9);
+
+      if (need3d) {
+        // mirror across model y–z plane, then the same camera
+        const mx = -ax;
+        let X1 = mx*cyA + az*syA, Z1 = -mx*syA + az*cyA, Y1 = ay;
+        let Y2 = Y1*cxA - Z1*sxA, Z2 = Y1*sxA + Z1*cxA;
+        let persp2 = FOCAL / (FOCAL + Z2);
+        sx2[i] = X1*scale*persp2; sy2[i] = Y2*scale*persp2; pp2[i] = persp2;
+        briT[i] = 0.045 + 0.9*flow + 0.16*(persp2 - 0.9);
+      }
+    }
+
+    bucketize(briB, bktsB);
+    if (need3d) bucketize(briT, bktsT);
+
+    // aubergine-black field
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    const bg = ctx.createRadialGradient(CX, H*0.47, 0, CX, H*0.47, Math.max(W,H)*0.8);
+    bg.addColorStop(0, "#16101f"); bg.addColorStop(1, "#06040b");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+    ctx.globalCompositeOperation = "lighter";
+
+    if (mode === "3d") {
+      ctx.save(); ctx.translate(CX, CY);
+      strokeForm(sx, sy, bktsB, goldPasses, 1.0, flick);
+      drawHeads(sx, sy, hp, 1.0, flick);
+      ctx.restore();
+      ctx.save(); ctx.translate(CX, CY);
+      strokeForm(sx2, sy2, bktsT, silverPasses, 0.6, flick);
+      drawHeads(sx2, sy2, hp, 0.5, flick);
+      ctx.restore();
+    } else if (mode === "bilateral") {
+      for (let s = 1; s >= -1; s -= 2) {
+        ctx.save(); ctx.translate(CX, CY); ctx.scale(s, 1);
+        strokeForm(sx, sy, bktsB, goldPasses, 1.0, flick);
+        drawHeads(sx, sy, hp, 1.0, flick);
+        ctx.restore();
+      }
+    } else { // kaleidoscope — dihedral 6-fold rosette
+      const M = 6, km = 0.52;
+      for (let k = 0; k < M; k++) {
+        for (let r = 1; r >= -1; r -= 2) {
+          ctx.save(); ctx.translate(CX, CY); ctx.rotate(k * 2*Math.PI/M); ctx.scale(1, r);
+          strokeForm(sx, sy, bktsB, goldPasses, km, flick);
+          drawHeads(sx, sy, hp, km*0.9, flick);
+          ctx.restore();
+        }
+      }
+    }
+
+    // film grain
+    ctx.globalCompositeOperation = "overlay";
+    ctx.globalAlpha = 0.045;
+    const ox = (Math.random()*160)|0, oy = (Math.random()*160)|0;
+    for (let gx = -ox; gx < W; gx += 160) for (let gy = -oy; gy < H; gy += 160) ctx.drawImage(grain, gx, gy);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+
+    requestAnimationFrame(frameTick);
+  }
+
+  window.addEventListener("resize", resize);
+  resize();
+  requestAnimationFrame(frameTick);
+
+  wake();
+  setTimeout(() => {
+    document.body.classList.remove("awake");
+    frame.style.opacity = "0.16"; caption.style.opacity = "0.55";
+  }, 5200);
+})();
+</script>
