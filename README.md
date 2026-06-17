@@ -3,7 +3,7 @@
 Browser-native generative art gallery built from dynamical systems, motion, geometry, and atmosphere.
 
 <p align="center">
-  <img src="https://i.imgur.com/yzfEvNz.png" width="900">
+  <img src="https://i.imgur.com/6JcjUP2.png" width="900">
 </p>
 
 ## Summary
