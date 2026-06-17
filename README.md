@@ -2,6 +2,8 @@
 
 Browser-native generative art gallery built from dynamical systems, motion, geometry, and atmosphere.
 
+![Eidolon Portal](https://i.imgur.com/yzfEvNz.png)
+
 ## Summary
 
 Eidolon is a collection of standalone interactive HTML/canvas artworks. The pieces explore strange attractors, tensegrity, modal vibration, coupled oscillators, grain, glow, typography, and responsive motion. It is the creative-technology wing of the portfolio: a studio artifact that shows aesthetic direction, mathematical visual systems, and comfort building immersive browser-native experiences without a heavy framework.
