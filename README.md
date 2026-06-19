@@ -1,7 +1,7 @@
 
 
 <p align="center">
-  <img src="https://i.imgur.com/6JcjUP2.png" width="600">
+  <img src="https://i.imgur.com/mvrJrq4.png" width="700">
 </p>
 
 # Eidola
