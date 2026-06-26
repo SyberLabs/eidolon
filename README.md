@@ -6,6 +6,8 @@
 
 # Eidola
 
+Live at: https://syberlabs.space/eidolon/
+
 Browser-native generative art gallery built from dynamical systems, motion, geometry, and atmosphere.
 ## Summary
 
